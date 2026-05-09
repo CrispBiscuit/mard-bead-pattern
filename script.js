@@ -35,6 +35,7 @@ async function init() {
   }
 
   updateDenoiseLabel();
+  updateCutoutLabel();
   updateAdjustmentLabels();
   updateGenerateButton();
   updateDownloadButtons();
@@ -54,6 +55,9 @@ function bindElements() {
     "denoiseValue",
     "maxColors",
     "ditherMode",
+    "cutoutMode",
+    "cutoutTolerance",
+    "cutoutToleranceValue",
     "brightness",
     "brightnessValue",
     "contrast",
@@ -121,6 +125,7 @@ function bindEvents() {
   });
 
   els.denoiseMin.addEventListener("input", updateDenoiseLabel);
+  els.cutoutTolerance.addEventListener("input", updateCutoutLabel);
   [els.brightness, els.contrast, els.saturation].forEach((input) => {
     input.addEventListener("input", updateAdjustmentLabels);
   });
@@ -133,7 +138,7 @@ function bindEvents() {
   els.colorFilter.addEventListener("change", () => {
     if (state.pattern) {
       renderPattern();
-      renderMaterials(state.pattern.materials, state.pattern.width * state.pattern.height);
+      renderMaterials(state.pattern.materials, state.pattern.beadCount);
     }
   });
 
@@ -262,12 +267,16 @@ function generatePattern() {
   const denoiseMin = Number.parseInt(els.denoiseMin.value, 10);
   const maxColors = Number.parseInt(els.maxColors.value, 10);
   const ditherMode = els.ditherMode.value;
+  const cutout = getCutoutSettings();
 
   setStatus("正在生成图纸...");
 
   window.setTimeout(() => {
     try {
-      const imageData = adjustImageData(renderSourceToImageData(state.sourceImage, width, height, mode), getAdjustments());
+      const imageData = applyAutoCutout(
+        adjustImageData(renderSourceToImageData(state.sourceImage, width, height, mode), getAdjustments()),
+        cutout,
+      );
       const pixels = mode === "photo" ? quantizeImageData(imageData, maxColors) : imageDataToRgbPixels(imageData);
       const allowedPalette = mode === "photo" && ditherMode === "floyd" ? buildAllowedPaletteIndices(pixels) : null;
       let cells = allowedPalette ? mapPixelsToPaletteWithDither(pixels, width, height, allowedPalette) : mapPixelsToPalette(pixels);
@@ -276,13 +285,15 @@ function generatePattern() {
         cells = denoiseCells(cells, width, height, denoiseMin);
       }
 
-      const materials = buildMaterials(cells, width * height);
-      state.pattern = { width, height, cells, materials, mode, denoiseMin, ditherMode };
+      const beadCount = countBeads(cells);
+      const materials = buildMaterials(cells, beadCount);
+      state.pattern = { width, height, cells, materials, beadCount, mode, denoiseMin, ditherMode, cutout };
 
       renderPattern();
-      renderMaterials(materials, width * height);
+      renderMaterials(materials, beadCount);
       els.emptyState.hidden = true;
-      els.patternStats.textContent = `${width}x${height} · ${width * height} 颗 · ${materials.length} 色`;
+      const blankCount = width * height - beadCount;
+      els.patternStats.textContent = `${width}x${height} · ${beadCount} 颗 · ${materials.length} 色${blankCount ? ` · 空 ${blankCount} 格` : ""}`;
       updateDownloadButtons();
       setStatus(`已生成 ${width}x${height} 图纸。`);
     } catch (error) {
@@ -332,6 +343,72 @@ function getAdjustments() {
   };
 }
 
+function getCutoutSettings() {
+  return {
+    mode: els.cutoutMode.value,
+    tolerance: Number.parseInt(els.cutoutTolerance.value, 10) || 34,
+  };
+}
+
+function applyAutoCutout(imageData, cutout) {
+  if (cutout.mode !== "corner") return imageData;
+
+  const { width, height, data } = imageData;
+  const tolerance = cutout.tolerance;
+  const visited = new Uint8Array(width * height);
+  const seeds = [
+    0,
+    width - 1,
+    (height - 1) * width,
+    height * width - 1,
+  ].filter((index, position, arr) => index >= 0 && index < width * height && arr.indexOf(index) === position);
+  const backgrounds = seeds.map((index) => rgbaAt(data, index));
+  const queue = [...seeds];
+  let cursor = 0;
+
+  seeds.forEach((index) => {
+    visited[index] = 1;
+  });
+
+  while (cursor < queue.length) {
+    const index = queue[cursor];
+    cursor += 1;
+    const color = rgbaAt(data, index);
+    if (!backgrounds.some((background) => colorDistance(color, background) <= tolerance)) continue;
+
+    data[index * 4 + 3] = 0;
+    const x = index % width;
+    const y = Math.floor(index / width);
+    const neighbors = [
+      x > 0 ? index - 1 : -1,
+      x < width - 1 ? index + 1 : -1,
+      y > 0 ? index - width : -1,
+      y < height - 1 ? index + width : -1,
+    ];
+
+    neighbors.forEach((neighbor) => {
+      if (neighbor >= 0 && !visited[neighbor]) {
+        visited[neighbor] = 1;
+        queue.push(neighbor);
+      }
+    });
+  }
+
+  return imageData;
+}
+
+function rgbaAt(data, index) {
+  const offset = index * 4;
+  return [data[offset], data[offset + 1], data[offset + 2], data[offset + 3]];
+}
+
+function colorDistance(a, b) {
+  const dr = a[0] - b[0];
+  const dg = a[1] - b[1];
+  const db = a[2] - b[2];
+  return Math.sqrt(dr * dr + dg * dg + db * db);
+}
+
 function adjustImageData(imageData, adjustments) {
   const { brightness, contrast, saturation } = adjustments;
   if (brightness === 0 && contrast === 0 && saturation === 0) return imageData;
@@ -361,7 +438,7 @@ function imageDataToRgbPixels(imageData) {
   const data = imageData.data;
 
   for (let i = 0, j = 0; i < data.length; i += 4, j += 1) {
-    pixels[j] = compositeOnWhite(data[i], data[i + 1], data[i + 2], data[i + 3]);
+    pixels[j] = data[i + 3] < 32 ? null : compositeOnWhite(data[i], data[i + 1], data[i + 2], data[i + 3]);
   }
 
   return pixels;
@@ -379,10 +456,16 @@ function quantizeImageData(imageData, maxColors) {
   for (let iteration = 0; iteration < 8; iteration += 1) {
     const sums = centers.map(() => [0, 0, 0, 0]);
     let changed = 0;
+    let activeCount = 0;
 
     for (let i = 0; i < pixels.length; i += 1) {
+      if (!pixels[i]) {
+        assignments[i] = -1;
+        continue;
+      }
       const next = nearestRgbCenter(pixels[i], centers);
       if (assignments[i] !== next) changed += 1;
+      activeCount += 1;
       assignments[i] = next;
       sums[next][0] += pixels[i][0];
       sums[next][1] += pixels[i][1];
@@ -400,15 +483,16 @@ function quantizeImageData(imageData, maxColors) {
       }
     });
 
-    if (changed / pixels.length < 0.01) break;
+    if (!activeCount || changed / activeCount < 0.01) break;
   }
 
-  return pixels.map((_, index) => centers[assignments[index]]);
+  return pixels.map((pixel, index) => (pixel ? centers[assignments[index]] : null));
 }
 
 function initializeCenters(pixels, maxColors) {
   const unique = new Map();
   pixels.forEach((pixel) => {
+    if (!pixel) return;
     unique.set(pixel.join(","), pixel);
   });
 
@@ -451,6 +535,10 @@ function mapPixelsToPalette(pixels) {
   const cells = new Int32Array(pixels.length);
 
   for (let i = 0; i < pixels.length; i += 1) {
+    if (!pixels[i]) {
+      cells[i] = -1;
+      continue;
+    }
     const key = pixels[i].join(",");
     let paletteIndex = cache.get(key);
 
@@ -468,6 +556,7 @@ function mapPixelsToPalette(pixels) {
 function buildAllowedPaletteIndices(pixels) {
   const allowed = new Set();
   pixels.forEach((pixel) => {
+    if (!pixel) return;
     allowed.add(nearestPaletteIndex(pixel));
   });
   return Array.from(allowed);
@@ -480,6 +569,10 @@ function mapPixelsToPaletteWithDither(pixels, width, height, allowedIndices) {
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       const index = y * width + x;
+      if (!work[index]) {
+        cells[index] = -1;
+        continue;
+      }
       const oldPixel = work[index].map((value) => clamp(Math.round(value), 0, 255));
       const paletteIndex = nearestPaletteIndex(oldPixel, allowedIndices);
       const color = state.palette[paletteIndex].rgb;
@@ -503,6 +596,7 @@ function mapPixelsToPaletteWithDither(pixels, width, height, allowedIndices) {
 function distributeDitherError(work, width, height, x, y, error, factor) {
   if (x < 0 || x >= width || y < 0 || y >= height) return;
   const index = y * width + x;
+  if (!work[index]) return;
   work[index][0] += error[0] * factor;
   work[index][1] += error[1] * factor;
   work[index][2] += error[2] * factor;
@@ -540,6 +634,10 @@ function denoiseCells(cells, width, height, minSize) {
 
     for (let start = 0; start < next.length; start += 1) {
       if (visited[start]) continue;
+      if (next[start] < 0) {
+        visited[start] = 1;
+        continue;
+      }
 
       const color = next[start];
       const component = [];
@@ -591,11 +689,8 @@ function chooseReplacementColor(sourceColor, neighborCounts) {
   const sourceLab = state.paletteLabs[sourceColor];
 
   neighborCounts.forEach((count, color) => {
-    const targetLab = state.paletteLabs[color];
-    const dl = sourceLab[0] - targetLab[0];
-    const da = sourceLab[1] - targetLab[1];
-    const db = sourceLab[2] - targetLab[2];
-    const distance = dl * dl + da * da + db * db;
+    const targetLab = color >= 0 ? state.paletteLabs[color] : null;
+    const distance = targetLab ? ((sourceLab[0] - targetLab[0]) ** 2 + (sourceLab[1] - targetLab[1]) ** 2 + (sourceLab[2] - targetLab[2]) ** 2) : Number.MAX_SAFE_INTEGER;
 
     if (count > bestCount || (count === bestCount && distance < bestDistance)) {
       bestColor = color;
@@ -611,6 +706,7 @@ function buildMaterials(cells, total) {
   const counts = new Map();
 
   cells.forEach((index) => {
+    if (index < 0) return;
     counts.set(index, (counts.get(index) || 0) + 1);
   });
 
@@ -618,9 +714,17 @@ function buildMaterials(cells, total) {
     .map(([index, count]) => ({
       ...state.palette[index],
       count,
-      percent: count / total,
+      percent: total ? count / total : 0,
     }))
     .sort((a, b) => naturalCodeSort(a.code, b.code));
+}
+
+function countBeads(cells) {
+  let total = 0;
+  cells.forEach((index) => {
+    if (index >= 0) total += 1;
+  });
+  return total;
 }
 
 function updateColorFilterOptions(materials) {
@@ -687,14 +791,14 @@ function drawPatternCanvas(canvas, width, height, cells, options = {}) {
   for (let y = 0; y < viewHeight; y += 1) {
     for (let x = 0; x < viewWidth; x += 1) {
       const colorIndex = cells[(startY + y) * width + startX + x];
+      if (colorIndex < 0) continue;
       const isVisible = options.filterIndex === null || options.filterIndex === undefined || colorIndex === options.filterIndex;
+      if (!isVisible) continue;
       const color = state.palette[colorIndex];
       ctx.fillStyle = color.hex;
-      ctx.globalAlpha = isVisible ? 1 : 0;
       ctx.fillRect(offsetX + x * cellSize, offsetY + y * cellSize, cellSize, cellSize);
-      ctx.globalAlpha = 1;
 
-      if (options.labels && isVisible) {
+      if (options.labels) {
         ctx.fillStyle = luminance(color.rgb) > 150 ? "#151515" : "#ffffff";
         ctx.font = `700 ${Math.max(8, Math.floor(cellSize * 0.38))}px Arial, sans-serif`;
         ctx.textAlign = "center";
@@ -805,7 +909,7 @@ function renderMaterials(materials, total) {
     button.addEventListener("click", () => {
       els.colorFilter.value = button.dataset.colorIndex;
       renderPattern();
-      renderMaterials(state.pattern.materials, state.pattern.width * state.pattern.height);
+      renderMaterials(state.pattern.materials, state.pattern.beadCount);
       setActiveView("grid");
     });
   });
@@ -1046,6 +1150,10 @@ function updateDownloadButtons() {
 function updateDenoiseLabel() {
   const value = Number.parseInt(els.denoiseMin.value, 10);
   els.denoiseValue.textContent = value === 0 ? "关闭" : `≤${value}格`;
+}
+
+function updateCutoutLabel() {
+  els.cutoutToleranceValue.textContent = els.cutoutTolerance.value;
 }
 
 function updateAdjustmentLabels() {

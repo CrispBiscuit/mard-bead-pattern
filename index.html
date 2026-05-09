@@ -91,6 +91,18 @@
             </select>
           </div>
 
+          <div class="field-group">
+            <label class="field-label" for="cutoutMode">自动抠图</label>
+            <select id="cutoutMode">
+              <option value="off" selected>关闭</option>
+              <option value="corner">四角背景自动删除</option>
+            </select>
+            <div class="range-row">
+              <input id="cutoutTolerance" type="range" min="8" max="90" value="34">
+              <output id="cutoutToleranceValue" for="cutoutTolerance">34</output>
+            </div>
+          </div>
+
           <div class="field-group adjust-panel">
             <span class="field-label">图像微调</span>
             <label class="range-row">

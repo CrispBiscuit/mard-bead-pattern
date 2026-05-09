@@ -16,6 +16,7 @@ Build a maintenance-light GitHub Pages tool that converts PNG/JPG images into MA
 - [x] Photo mode includes the most useful lightweight controls found in comparable bead-pattern tools.
 - [x] Users can isolate one MARD color in the preview and exports.
 - [x] Users can generate non-square patterns by preserving the source image aspect ratio from a target width or height.
+- [x] Users can remove simple/solid image backgrounds into blank bead cells before color mapping.
 
 # Plan
 
@@ -32,3 +33,6 @@ Build a maintenance-light GitHub Pages tool that converts PNG/JPG images into MA
 - [x] Re-run browser verification and push the update.
 - [x] Add aspect-ratio size presets and validation.
 - [x] Re-run browser verification and push the aspect-ratio update.
+- [x] Add browser-side corner flood-fill background cutout controls.
+- [x] Support blank cells in rendering, filtering, material counts, and exports.
+- [x] Re-run browser verification and push the cutout update.
