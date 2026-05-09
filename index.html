@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="MARD 拼豆图纸生成器，把 PNG/JPG 转换为拼豆图纸、色号图、材料清单和 PDF。">
+    <title>MARD 拼豆图纸生成器</title>
+    <link rel="stylesheet" href="./styles.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <script defer src="./script.js"></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <h1>MARD 拼豆图纸生成器</h1>
+          <p>PNG/JPG 本地转换为网格图、色号图、材料清单和打印 PDF。</p>
+        </div>
+        <div class="palette-meter" aria-label="MARD 色卡状态">
+          <span id="paletteCount">载入色卡...</span>
+        </div>
+      </header>
+
+      <section class="workspace" aria-label="拼豆图纸工具">
+        <aside class="control-panel">
+          <label class="drop-zone" for="imageInput" id="dropZone">
+            <input id="imageInput" type="file" accept="image/png,image/jpeg">
+            <span class="drop-title">选择 PNG/JPG</span>
+            <span class="drop-meta" id="fileMeta">或拖入图片</span>
+          </label>
+
+          <div class="field-group">
+            <span class="field-label">模式</span>
+            <div class="segmented" role="radiogroup" aria-label="转换模式">
+              <label>
+                <input type="radio" name="mode" value="pixel" checked>
+                <span>Pixel-art</span>
+              </label>
+              <label>
+                <input type="radio" name="mode" value="photo">
+                <span>Photo</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="field-group">
+            <label class="field-label" for="sizePreset">尺寸</label>
+            <select id="sizePreset">
+              <option value="29x29">29 x 29</option>
+              <option value="58x58" selected>58 x 58</option>
+              <option value="87x87">87 x 87</option>
+              <option value="custom">自定义</option>
+            </select>
+            <div class="size-row" id="customSizeRow" hidden>
+              <label>
+                <span>宽</span>
+                <input id="customWidth" type="number" min="8" max="160" value="58">
+              </label>
+              <label>
+                <span>高</span>
+                <input id="customHeight" type="number" min="8" max="160" value="58">
+              </label>
+            </div>
+          </div>
+
+          <div class="field-group">
+            <label class="field-label" for="denoiseMin">去杂色</label>
+            <div class="range-row">
+              <input id="denoiseMin" type="range" min="0" max="8" value="0">
+              <output id="denoiseValue" for="denoiseMin">关闭</output>
+            </div>
+          </div>
+
+          <div class="field-group">
+            <label class="field-label" for="maxColors">Photo 量化色数</label>
+            <select id="maxColors">
+              <option value="24">24</option>
+              <option value="36">36</option>
+              <option value="48" selected>48</option>
+              <option value="64">64</option>
+            </select>
+          </div>
+
+          <button class="primary-action" id="generateBtn" type="button" disabled>生成图纸</button>
+
+          <div class="download-grid" aria-label="下载输出">
+            <button id="downloadGrid" type="button" disabled>网格 PNG</button>
+            <button id="downloadCode" type="button" disabled>色号 PNG</button>
+            <button id="downloadLegend" type="button" disabled>图例 PNG</button>
+            <button id="downloadCsv" type="button" disabled>材料 CSV</button>
+            <button id="downloadPdf" type="button" disabled>打印 PDF</button>
+          </div>
+
+          <p class="status" id="statusText">等待上传图片。</p>
+        </aside>
+
+        <section class="preview-panel">
+          <div class="preview-toolbar">
+            <div>
+              <h2>图纸预览</h2>
+              <p id="patternStats">未生成</p>
+            </div>
+            <div class="tabs" role="tablist" aria-label="预览类型">
+              <button class="tab active" type="button" data-view="grid">网格</button>
+              <button class="tab" type="button" data-view="code">色号</button>
+              <button class="tab" type="button" data-view="legend">图例</button>
+            </div>
+          </div>
+
+          <div class="canvas-stage">
+            <canvas id="gridCanvas" aria-label="带网格的图纸"></canvas>
+            <canvas id="codeCanvas" aria-label="带 MARD 色号的图纸" hidden></canvas>
+            <canvas id="legendCanvas" aria-label="MARD 色号图例" hidden></canvas>
+            <div class="empty-state" id="emptyState">
+              <canvas id="sampleCanvas" aria-label="MARD 色卡示意"></canvas>
+              <span>上传图片后生成图纸</span>
+            </div>
+          </div>
+
+          <section class="materials-panel" aria-label="材料清单">
+            <div class="materials-header">
+              <h2>材料清单</h2>
+              <span id="materialTotal">0 颗</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>色号</th>
+                    <th>颜色</th>
+                    <th>HEX</th>
+                    <th>数量</th>
+                  </tr>
+                </thead>
+                <tbody id="materialsBody">
+                  <tr>
+                    <td colspan="4">暂无材料数据</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>
