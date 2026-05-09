@@ -227,6 +227,17 @@ select,
   align-items: center;
 }
 
+.adjust-panel {
+  align-content: start;
+}
+
+.adjust-panel .range-row {
+  grid-template-columns: 38px minmax(0, 1fr) 44px;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .range-row output {
   color: var(--muted);
   font-size: 13px;
@@ -295,6 +306,26 @@ select,
   display: flex;
   gap: 6px;
   align-items: center;
+}
+
+.view-tools {
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+}
+
+.filter-control {
+  display: grid;
+  grid-template-columns: auto minmax(150px, 220px);
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.filter-control select {
+  min-height: 34px;
 }
 
 .tab {
@@ -407,6 +438,18 @@ th {
   vertical-align: middle;
 }
 
+.material-filter-btn {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--accent-strong);
+  font-weight: 900;
+}
+
+tr.filtered-row {
+  background: #eaf5ef;
+}
+
 @media (max-width: 900px) {
   .app-shell {
     padding: 14px;
@@ -416,6 +459,14 @@ th {
   .preview-toolbar {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .view-tools {
+    justify-items: stretch;
+  }
+
+  .filter-control {
+    grid-template-columns: 1fr;
   }
 
   .workspace {

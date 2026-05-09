@@ -35,6 +35,7 @@ async function init() {
   }
 
   updateDenoiseLabel();
+  updateAdjustmentLabels();
   updateGenerateButton();
   updateDownloadButtons();
 }
@@ -52,6 +53,14 @@ function bindElements() {
     "denoiseMin",
     "denoiseValue",
     "maxColors",
+    "ditherMode",
+    "brightness",
+    "brightnessValue",
+    "contrast",
+    "contrastValue",
+    "saturation",
+    "saturationValue",
+    "exportCellSize",
     "generateBtn",
     "downloadGrid",
     "downloadCode",
@@ -60,6 +69,7 @@ function bindElements() {
     "downloadPdf",
     "statusText",
     "patternStats",
+    "colorFilter",
     "gridCanvas",
     "codeCanvas",
     "legendCanvas",
@@ -109,12 +119,21 @@ function bindEvents() {
   });
 
   els.denoiseMin.addEventListener("input", updateDenoiseLabel);
+  [els.brightness, els.contrast, els.saturation].forEach((input) => {
+    input.addEventListener("input", updateAdjustmentLabels);
+  });
   els.generateBtn.addEventListener("click", generatePattern);
-  els.downloadGrid.addEventListener("click", () => downloadCanvas(els.gridCanvas, "pattern_grid.png"));
-  els.downloadCode.addEventListener("click", () => downloadCanvas(els.codeCanvas, "pattern_code.png"));
+  els.downloadGrid.addEventListener("click", () => downloadCanvas(createExportPatternCanvas(false), "pattern_grid.png"));
+  els.downloadCode.addEventListener("click", () => downloadCanvas(createExportPatternCanvas(true), "pattern_code.png"));
   els.downloadLegend.addEventListener("click", () => downloadCanvas(els.legendCanvas, "legend.png"));
   els.downloadCsv.addEventListener("click", downloadMaterialsCsv);
   els.downloadPdf.addEventListener("click", downloadPdf);
+  els.colorFilter.addEventListener("change", () => {
+    if (state.pattern) {
+      renderPattern();
+      renderMaterials(state.pattern.materials, state.pattern.width * state.pattern.height);
+    }
+  });
 
   document.querySelectorAll(".tab").forEach((button) => {
     button.addEventListener("click", () => setActiveView(button.dataset.view));
@@ -170,8 +189,8 @@ function getRequestedSize() {
     return { width, height };
   }
 
-  const width = clamp(Number.parseInt(els.customWidth.value, 10) || 58, 8, 160);
-  const height = clamp(Number.parseInt(els.customHeight.value, 10) || 58, 8, 160);
+  const width = clamp(Number.parseInt(els.customWidth.value, 10) || 58, 8, 300);
+  const height = clamp(Number.parseInt(els.customHeight.value, 10) || 58, 8, 300);
   els.customWidth.value = String(width);
   els.customHeight.value = String(height);
   return { width, height };
@@ -184,21 +203,23 @@ function generatePattern() {
   const { width, height } = getRequestedSize();
   const denoiseMin = Number.parseInt(els.denoiseMin.value, 10);
   const maxColors = Number.parseInt(els.maxColors.value, 10);
+  const ditherMode = els.ditherMode.value;
 
   setStatus("正在生成图纸...");
 
   window.setTimeout(() => {
     try {
-      const imageData = renderSourceToImageData(state.sourceImage, width, height, mode);
+      const imageData = adjustImageData(renderSourceToImageData(state.sourceImage, width, height, mode), getAdjustments());
       const pixels = mode === "photo" ? quantizeImageData(imageData, maxColors) : imageDataToRgbPixels(imageData);
-      let cells = mapPixelsToPalette(pixels);
+      const allowedPalette = mode === "photo" && ditherMode === "floyd" ? buildAllowedPaletteIndices(pixels) : null;
+      let cells = allowedPalette ? mapPixelsToPaletteWithDither(pixels, width, height, allowedPalette) : mapPixelsToPalette(pixels);
 
       if (denoiseMin > 0) {
         cells = denoiseCells(cells, width, height, denoiseMin);
       }
 
       const materials = buildMaterials(cells, width * height);
-      state.pattern = { width, height, cells, materials, mode, denoiseMin };
+      state.pattern = { width, height, cells, materials, mode, denoiseMin, ditherMode };
 
       renderPattern();
       renderMaterials(materials, width * height);
@@ -243,6 +264,38 @@ function renderSourceToImageData(image, width, height, mode) {
   }
 
   return ctx.getImageData(0, 0, width, height);
+}
+
+function getAdjustments() {
+  return {
+    brightness: Number.parseInt(els.brightness.value, 10) || 0,
+    contrast: Number.parseInt(els.contrast.value, 10) || 0,
+    saturation: Number.parseInt(els.saturation.value, 10) || 0,
+  };
+}
+
+function adjustImageData(imageData, adjustments) {
+  const { brightness, contrast, saturation } = adjustments;
+  if (brightness === 0 && contrast === 0 && saturation === 0) return imageData;
+
+  const data = imageData.data;
+  const contrastFactor = (259 * (contrast + 255)) / (255 * (259 - contrast));
+  const saturationFactor = 1 + saturation / 100;
+
+  for (let i = 0; i < data.length; i += 4) {
+    let r = contrastFactor * (data[i] - 128) + 128 + brightness;
+    let g = contrastFactor * (data[i + 1] - 128) + 128 + brightness;
+    let b = contrastFactor * (data[i + 2] - 128) + 128 + brightness;
+    const grey = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    r = grey + (r - grey) * saturationFactor;
+    g = grey + (g - grey) * saturationFactor;
+    b = grey + (b - grey) * saturationFactor;
+    data[i] = clamp(Math.round(r), 0, 255);
+    data[i + 1] = clamp(Math.round(g), 0, 255);
+    data[i + 2] = clamp(Math.round(b), 0, 255);
+  }
+
+  return imageData;
 }
 
 function imageDataToRgbPixels(imageData) {
@@ -354,13 +407,58 @@ function mapPixelsToPalette(pixels) {
   return cells;
 }
 
-function nearestPaletteIndex(rgb) {
+function buildAllowedPaletteIndices(pixels) {
+  const allowed = new Set();
+  pixels.forEach((pixel) => {
+    allowed.add(nearestPaletteIndex(pixel));
+  });
+  return Array.from(allowed);
+}
+
+function mapPixelsToPaletteWithDither(pixels, width, height, allowedIndices) {
+  const work = pixels.map((pixel) => [pixel[0], pixel[1], pixel[2]]);
+  const cells = new Int32Array(pixels.length);
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = y * width + x;
+      const oldPixel = work[index].map((value) => clamp(Math.round(value), 0, 255));
+      const paletteIndex = nearestPaletteIndex(oldPixel, allowedIndices);
+      const color = state.palette[paletteIndex].rgb;
+      cells[index] = paletteIndex;
+      const error = [
+        oldPixel[0] - color[0],
+        oldPixel[1] - color[1],
+        oldPixel[2] - color[2],
+      ];
+
+      distributeDitherError(work, width, height, x + 1, y, error, 7 / 16);
+      distributeDitherError(work, width, height, x - 1, y + 1, error, 3 / 16);
+      distributeDitherError(work, width, height, x, y + 1, error, 5 / 16);
+      distributeDitherError(work, width, height, x + 1, y + 1, error, 1 / 16);
+    }
+  }
+
+  return cells;
+}
+
+function distributeDitherError(work, width, height, x, y, error, factor) {
+  if (x < 0 || x >= width || y < 0 || y >= height) return;
+  const index = y * width + x;
+  work[index][0] += error[0] * factor;
+  work[index][1] += error[1] * factor;
+  work[index][2] += error[2] * factor;
+}
+
+function nearestPaletteIndex(rgb, candidateIndices = null) {
   const lab = rgbToLab(rgb[0], rgb[1], rgb[2]);
-  let bestIndex = 0;
+  const candidateCount = candidateIndices ? candidateIndices.length : state.paletteLabs.length;
+  let bestIndex = candidateIndices ? candidateIndices[0] ?? 0 : 0;
   let bestDistance = Infinity;
 
-  for (let i = 0; i < state.paletteLabs.length; i += 1) {
-    const target = state.paletteLabs[i];
+  for (let i = 0; i < candidateCount; i += 1) {
+    const candidateIndex = candidateIndices ? candidateIndices[i] : i;
+    const target = state.paletteLabs[candidateIndex];
     const dl = lab[0] - target[0];
     const da = lab[1] - target[1];
     const db = lab[2] - target[2];
@@ -368,7 +466,7 @@ function nearestPaletteIndex(rgb) {
 
     if (distance < bestDistance) {
       bestDistance = distance;
-      bestIndex = i;
+      bestIndex = candidateIndex;
     }
   }
 
@@ -467,61 +565,129 @@ function buildMaterials(cells, total) {
     .sort((a, b) => naturalCodeSort(a.code, b.code));
 }
 
+function updateColorFilterOptions(materials) {
+  const current = els.colorFilter.value;
+  els.colorFilter.innerHTML = '<option value="all">全部颜色</option>';
+
+  materials.forEach((item) => {
+    const option = document.createElement("option");
+    option.value = String(item.index);
+    option.textContent = `${item.code} · ${item.count}颗`;
+    els.colorFilter.appendChild(option);
+  });
+
+  const stillAvailable = current === "all" || materials.some((item) => String(item.index) === current);
+  els.colorFilter.value = stillAvailable ? current : "all";
+  els.colorFilter.disabled = false;
+}
+
+function getColorFilterIndex() {
+  if (!els.colorFilter || els.colorFilter.value === "all") return null;
+  const index = Number.parseInt(els.colorFilter.value, 10);
+  return Number.isFinite(index) ? index : null;
+}
+
+function getColorFilterLabel() {
+  const index = getColorFilterIndex();
+  return index === null ? "" : `_${state.palette[index].code}`;
+}
+
 function renderPattern() {
   const { width, height, cells, materials } = state.pattern;
-  drawPatternCanvas(els.gridCanvas, width, height, cells, { labels: false });
-  drawPatternCanvas(els.codeCanvas, width, height, cells, { labels: true });
+  updateColorFilterOptions(materials);
+  const filterIndex = getColorFilterIndex();
+  drawPatternCanvas(els.gridCanvas, width, height, cells, { labels: false, filterIndex });
+  drawPatternCanvas(els.codeCanvas, width, height, cells, { labels: true, filterIndex });
   drawLegendCanvas(els.legendCanvas, materials);
   setActiveView(state.activeView);
 }
 
-function drawPatternCanvas(canvas, width, height, cells, options) {
+function drawPatternCanvas(canvas, width, height, cells, options = {}) {
+  const startX = options.startX || 0;
+  const startY = options.startY || 0;
+  const viewWidth = options.viewWidth || width;
+  const viewHeight = options.viewHeight || height;
   const maxDimension = options.labels ? 1900 : 1400;
   const minCell = options.labels ? 20 : 10;
   const maxCell = options.labels ? 34 : 28;
-  const cellSize = clamp(Math.floor(maxDimension / Math.max(width, height)), minCell, maxCell);
-  const dpr = 1;
+  const cellSize = options.cellSize || clamp(Math.floor(maxDimension / Math.max(viewWidth, viewHeight)), minCell, maxCell);
+  const labelBand = options.coordinates ? 34 : 0;
+  const offsetX = labelBand;
+  const offsetY = labelBand;
 
-  canvas.width = width * cellSize + 1;
-  canvas.height = height * cellSize + 1;
+  canvas.width = viewWidth * cellSize + offsetX + 1;
+  canvas.height = viewHeight * cellSize + offsetY + 1;
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const color = state.palette[cells[y * width + x]];
+  if (options.coordinates) {
+    drawCoordinateLabels(ctx, startX, startY, viewWidth, viewHeight, cellSize, offsetX, offsetY);
+  }
+
+  for (let y = 0; y < viewHeight; y += 1) {
+    for (let x = 0; x < viewWidth; x += 1) {
+      const colorIndex = cells[(startY + y) * width + startX + x];
+      const isVisible = options.filterIndex === null || options.filterIndex === undefined || colorIndex === options.filterIndex;
+      const color = state.palette[colorIndex];
       ctx.fillStyle = color.hex;
-      ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+      ctx.globalAlpha = isVisible ? 1 : 0;
+      ctx.fillRect(offsetX + x * cellSize, offsetY + y * cellSize, cellSize, cellSize);
+      ctx.globalAlpha = 1;
 
-      if (options.labels) {
+      if (options.labels && isVisible) {
         ctx.fillStyle = luminance(color.rgb) > 150 ? "#151515" : "#ffffff";
-        ctx.font = `700 ${Math.max(7, Math.floor(cellSize * 0.36 * dpr))}px Arial, sans-serif`;
+        ctx.font = `700 ${Math.max(8, Math.floor(cellSize * 0.38))}px Arial, sans-serif`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText(color.code, x * cellSize + cellSize / 2, y * cellSize + cellSize / 2);
+        ctx.fillText(color.code, offsetX + x * cellSize + cellSize / 2, offsetY + y * cellSize + cellSize / 2);
       }
     }
   }
 
-  drawGridLines(ctx, width, height, cellSize);
+  drawGridLines(ctx, viewWidth, viewHeight, cellSize, offsetX, offsetY);
 }
 
-function drawGridLines(ctx, width, height, cellSize) {
+function drawCoordinateLabels(ctx, startX, startY, width, height, cellSize, offsetX, offsetY) {
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, offsetX, offsetY);
+  ctx.fillStyle = "#4f5d56";
+  ctx.font = "700 10px Arial, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  for (let x = 0; x < width; x += 1) {
+    const label = startX + x + 1;
+    if (label === 1 || label % 5 === 0 || x === width - 1) {
+      ctx.fillText(String(label), offsetX + x * cellSize + cellSize / 2, offsetY / 2);
+    }
+  }
+
+  for (let y = 0; y < height; y += 1) {
+    const label = startY + y + 1;
+    if (label === 1 || label % 5 === 0 || y === height - 1) {
+      ctx.fillText(String(label), offsetX / 2, offsetY + y * cellSize + cellSize / 2);
+    }
+  }
+}
+
+function drawGridLines(ctx, width, height, cellSize, offsetX = 0, offsetY = 0) {
   ctx.lineWidth = 1;
 
   for (let x = 0; x <= width; x += 1) {
     ctx.strokeStyle = x % 10 === 0 ? "rgba(0,0,0,0.42)" : x % 5 === 0 ? "rgba(0,0,0,0.28)" : "rgba(0,0,0,0.12)";
     ctx.beginPath();
-    ctx.moveTo(x * cellSize + 0.5, 0);
-    ctx.lineTo(x * cellSize + 0.5, height * cellSize);
+    ctx.moveTo(offsetX + x * cellSize + 0.5, offsetY);
+    ctx.lineTo(offsetX + x * cellSize + 0.5, offsetY + height * cellSize);
     ctx.stroke();
   }
 
   for (let y = 0; y <= height; y += 1) {
     ctx.strokeStyle = y % 10 === 0 ? "rgba(0,0,0,0.42)" : y % 5 === 0 ? "rgba(0,0,0,0.28)" : "rgba(0,0,0,0.12)";
     ctx.beginPath();
-    ctx.moveTo(0, y * cellSize + 0.5);
-    ctx.lineTo(width * cellSize, y * cellSize + 0.5);
+    ctx.moveTo(offsetX, offsetY + y * cellSize + 0.5);
+    ctx.lineTo(offsetX + width * cellSize, offsetY + y * cellSize + 0.5);
     ctx.stroke();
   }
 }
@@ -567,13 +733,23 @@ function renderMaterials(materials, total) {
 
   materials.forEach((item) => {
     const row = document.createElement("tr");
+    row.classList.toggle("filtered-row", String(item.index) === els.colorFilter.value);
     row.innerHTML = `
-      <td><strong>${escapeHtml(item.code)}</strong></td>
+      <td><button class="material-filter-btn" type="button" data-color-index="${item.index}">${escapeHtml(item.code)}</button></td>
       <td><span class="swatch" style="background:${item.hex}"></span></td>
       <td>${escapeHtml(item.hex)}</td>
       <td>${item.count}</td>
     `;
     els.materialsBody.appendChild(row);
+  });
+
+  els.materialsBody.querySelectorAll(".material-filter-btn").forEach((button) => {
+    button.addEventListener("click", () => {
+      els.colorFilter.value = button.dataset.colorIndex;
+      renderPattern();
+      renderMaterials(state.pattern.materials, state.pattern.width * state.pattern.height);
+      setActiveView("grid");
+    });
   });
 }
 
@@ -581,6 +757,8 @@ function clearMaterials() {
   els.materialsBody.innerHTML = `<tr><td colspan="4">暂无材料数据</td></tr>`;
   els.materialTotal.textContent = "0 颗";
   els.patternStats.textContent = "未生成";
+  els.colorFilter.innerHTML = '<option value="all">全部颜色</option>';
+  els.colorFilter.disabled = true;
 }
 
 function setActiveView(view) {
@@ -594,9 +772,36 @@ function setActiveView(view) {
   });
 }
 
+function getExportCellSize(width = state.pattern?.width || 58, height = state.pattern?.height || 58) {
+  const requested = Number.parseInt(els.exportCellSize.value, 10) || 32;
+  const maxCanvasDimension = 12000;
+  const maxSafeCell = Math.max(8, Math.floor((maxCanvasDimension - 34) / Math.max(width, height)));
+  return Math.min(requested, maxSafeCell);
+}
+
+function createExportPatternCanvas(labels, overrides = {}) {
+  if (!state.pattern) return document.createElement("canvas");
+  const canvas = document.createElement("canvas");
+  const viewWidth = overrides.viewWidth || state.pattern.width;
+  const viewHeight = overrides.viewHeight || state.pattern.height;
+  drawPatternCanvas(canvas, state.pattern.width, state.pattern.height, state.pattern.cells, {
+    labels,
+    cellSize: getExportCellSize(viewWidth, viewHeight),
+    coordinates: true,
+    filterIndex: getColorFilterIndex(),
+    ...overrides,
+  });
+  return canvas;
+}
+
+function withFilterFilename(filename) {
+  const suffix = getColorFilterLabel();
+  return suffix ? filename.replace(/(\.[^.]+)$/, `${suffix}$1`) : filename;
+}
+
 function downloadCanvas(canvas, filename) {
   const link = document.createElement("a");
-  link.download = filename;
+  link.download = withFilterFilename(filename);
   link.href = canvas.toDataURL("image/png");
   link.click();
 }
@@ -635,15 +840,18 @@ function downloadPdf() {
 
   const { jsPDF } = jsPdfNamespace;
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
-  const title = `MARD 拼豆图纸 · ${state.pattern.width}x${state.pattern.height}`;
+  const filterIndex = getColorFilterIndex();
+  const filterText = filterIndex === null ? "" : ` · Only ${state.palette[filterIndex].code}`;
+  const title = `MARD bead pattern · ${state.pattern.width}x${state.pattern.height}${filterText}`;
 
-  addCanvasPage(doc, title, els.gridCanvas, true);
+  addCanvasPage(doc, title, createExportPatternCanvas(false, { cellSize: Math.max(18, Math.round(getExportCellSize(state.pattern.width, state.pattern.height) * 0.7)) }), true);
   doc.addPage("a4", "landscape");
-  addCanvasPage(doc, "MARD 色号图", els.codeCanvas, false);
+  addCanvasPage(doc, "MARD code overview", createExportPatternCanvas(true), false);
+  addBoardPatternPages(doc);
   doc.addPage("a4", "landscape");
-  addCanvasPage(doc, "MARD 色号图例", els.legendCanvas, false);
+  addCanvasPage(doc, "MARD legend", els.legendCanvas, false);
   addMaterialsPages(doc);
-  doc.save("pattern.pdf");
+  doc.save(withFilterFilename("pattern.pdf"));
 }
 
 function addCanvasPage(doc, title, canvas, includeMeta) {
@@ -666,10 +874,36 @@ function addCanvasPage(doc, title, canvas, includeMeta) {
   if (includeMeta) {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
-    doc.text(`Mode: ${state.pattern.mode}  Colors: ${state.pattern.materials.length}  Source: ${state.sourceFileName}`, margin, margin + 20);
+    const filterIndex = getColorFilterIndex();
+    const filterInfo = filterIndex === null ? "All colors" : `Only ${state.palette[filterIndex].code}`;
+    doc.text(`Mode: ${state.pattern.mode}  Colors: ${state.pattern.materials.length}  Filter: ${filterInfo}  Source: ${state.sourceFileName}`, margin, margin + 20);
   }
 
   doc.addImage(canvas.toDataURL("image/png"), "PNG", x, y, imageWidth, imageHeight);
+}
+
+function addBoardPatternPages(doc) {
+  const boardSize = 29;
+  const columns = Math.ceil(state.pattern.width / boardSize);
+  const rows = Math.ceil(state.pattern.height / boardSize);
+
+  for (let by = 0; by < rows; by += 1) {
+    for (let bx = 0; bx < columns; bx += 1) {
+      const startX = bx * boardSize;
+      const startY = by * boardSize;
+      const viewWidth = Math.min(boardSize, state.pattern.width - startX);
+      const viewHeight = Math.min(boardSize, state.pattern.height - startY);
+      const boardCanvas = createExportPatternCanvas(true, {
+        startX,
+        startY,
+        viewWidth,
+        viewHeight,
+        cellSize: Math.max(24, getExportCellSize(viewWidth, viewHeight)),
+      });
+      doc.addPage("a4", "landscape");
+      addCanvasPage(doc, `Board ${by + 1}-${bx + 1} · rows ${startY + 1}-${startY + viewHeight} · cols ${startX + 1}-${startX + viewWidth}`, boardCanvas, false);
+    }
+  }
 }
 
 function addMaterialsPages(doc) {
@@ -754,6 +988,12 @@ function updateDownloadButtons() {
 function updateDenoiseLabel() {
   const value = Number.parseInt(els.denoiseMin.value, 10);
   els.denoiseValue.textContent = value === 0 ? "关闭" : `≤${value}格`;
+}
+
+function updateAdjustmentLabels() {
+  els.brightnessValue.textContent = els.brightness.value;
+  els.contrastValue.textContent = els.contrast.value;
+  els.saturationValue.textContent = els.saturation.value;
 }
 
 function setStatus(message) {

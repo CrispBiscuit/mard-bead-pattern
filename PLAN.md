@@ -12,6 +12,9 @@ Build a maintenance-light GitHub Pages tool that converts PNG/JPG images into MA
 - [x] `data/mard-palette.json` contains 221 unique MARD color entries.
 - [x] Local verification covers a pixel-art sample, a photo-like sample, palette validation, and responsive layout.
 - [x] The layout is verified for iPad mini 6 portrait and landscape CSS viewports.
+- [x] Exported PNG/PDF patterns stay readable for larger bead grids.
+- [x] Photo mode includes the most useful lightweight controls found in comparable bead-pattern tools.
+- [x] Users can isolate one MARD color in the preview and exports.
 
 # Plan
 
@@ -21,3 +24,8 @@ Build a maintenance-light GitHub Pages tool that converts PNG/JPG images into MA
 - [x] Implement browser-side image processing and MARD color matching.
 - [x] Implement PNG, CSV, legend, and PDF exports.
 - [x] Run local validation and update this checklist.
+- [x] Add high-resolution export cell-size controls for grid/code PNG output.
+- [x] Add multi-board, readable PDF pages for large patterns.
+- [x] Add photo adjustment and optional dithering controls.
+- [x] Add a same-color filter from the preview toolbar and materials table.
+- [x] Re-run browser verification and push the update.
