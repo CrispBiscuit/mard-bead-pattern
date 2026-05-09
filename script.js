@@ -108,8 +108,10 @@ function bindEvents() {
   });
 
   els.sizePreset.addEventListener("change", () => {
-    els.customSizeRow.hidden = els.sizePreset.value !== "custom";
+    updateSizeControls();
   });
+  els.customWidth.addEventListener("input", () => updateLinkedAspectSize("width"));
+  els.customHeight.addEventListener("input", () => updateLinkedAspectSize("height"));
 
   document.querySelectorAll("input[name='mode']").forEach((input) => {
     input.addEventListener("change", () => {
@@ -152,6 +154,8 @@ async function loadImageFile(file) {
     state.sourceFileName = file.name;
     state.pattern = null;
     els.fileMeta.textContent = `${file.name} · ${image.naturalWidth}x${image.naturalHeight}`;
+    updateAspectDefaults();
+    updateSizeControls();
     els.emptyState.hidden = false;
     clearMaterials();
     updateGenerateButton();
@@ -183,8 +187,62 @@ function getMode() {
   return document.querySelector("input[name='mode']:checked").value;
 }
 
+function getSourceRatio() {
+  if (!state.sourceImage) return 1;
+  return state.sourceImage.naturalWidth / state.sourceImage.naturalHeight || 1;
+}
+
+function updateAspectDefaults() {
+  if (!state.sourceImage || !["auto-width", "auto-height"].includes(els.sizePreset.value)) return;
+  updateLinkedAspectSize(els.sizePreset.value === "auto-width" ? "width" : "height");
+}
+
+function updateSizeControls() {
+  const preset = els.sizePreset.value;
+  const usesCustomInputs = ["custom", "auto-width", "auto-height"].includes(preset);
+  els.customSizeRow.hidden = !usesCustomInputs;
+  els.customWidth.disabled = preset === "auto-height";
+  els.customHeight.disabled = preset === "auto-width";
+
+  if (preset === "auto-width") {
+    updateLinkedAspectSize("width");
+  } else if (preset === "auto-height") {
+    updateLinkedAspectSize("height");
+  }
+}
+
+function updateLinkedAspectSize(source) {
+  if (!state.sourceImage) return;
+  const preset = els.sizePreset.value;
+  if (preset === "auto-width" && source === "width") {
+    const width = clamp(Number.parseInt(els.customWidth.value, 10) || 58, 8, 300);
+    const height = clamp(Math.round(width / getSourceRatio()), 8, 300);
+    els.customWidth.value = String(width);
+    els.customHeight.value = String(height);
+  } else if (preset === "auto-height" && source === "height") {
+    const height = clamp(Number.parseInt(els.customHeight.value, 10) || 58, 8, 300);
+    const width = clamp(Math.round(height * getSourceRatio()), 8, 300);
+    els.customHeight.value = String(height);
+    els.customWidth.value = String(width);
+  }
+}
+
 function getRequestedSize() {
   if (els.sizePreset.value !== "custom") {
+    if (els.sizePreset.value === "auto-width") {
+      updateLinkedAspectSize("width");
+      const width = Number.parseInt(els.customWidth.value, 10);
+      const height = Number.parseInt(els.customHeight.value, 10);
+      return { width, height };
+    }
+
+    if (els.sizePreset.value === "auto-height") {
+      updateLinkedAspectSize("height");
+      const width = Number.parseInt(els.customWidth.value, 10);
+      const height = Number.parseInt(els.customHeight.value, 10);
+      return { width, height };
+    }
+
     const [width, height] = els.sizePreset.value.split("x").map(Number);
     return { width, height };
   }
