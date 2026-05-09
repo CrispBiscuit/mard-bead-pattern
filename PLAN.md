@@ -17,6 +17,7 @@ Build a maintenance-light GitHub Pages tool that converts PNG/JPG images into MA
 - [x] Users can isolate one MARD color in the preview and exports.
 - [x] Users can generate non-square patterns by preserving the source image aspect ratio from a target width or height.
 - [x] Users can remove simple/solid image backgrounds into blank bead cells before color mapping.
+- [x] Aspect-ratio size inputs do not rewrite user keyboard input while typing.
 
 # Plan
 
@@ -36,3 +37,5 @@ Build a maintenance-light GitHub Pages tool that converts PNG/JPG images into MA
 - [x] Add browser-side corner flood-fill background cutout controls.
 - [x] Support blank cells in rendering, filtering, material counts, and exports.
 - [x] Re-run browser verification and push the cutout update.
+- [x] Fix aspect-ratio size input keyboard handling.
+- [x] Re-run local browser verification and push the input fix.

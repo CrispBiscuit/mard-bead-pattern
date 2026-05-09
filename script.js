@@ -49,8 +49,13 @@ function bindElements() {
     "fileMeta",
     "sizePreset",
     "customSizeRow",
+    "widthField",
+    "widthLabel",
     "customWidth",
+    "heightField",
+    "heightLabel",
     "customHeight",
+    "sizeHint",
     "denoiseMin",
     "denoiseValue",
     "maxColors",
@@ -114,8 +119,10 @@ function bindEvents() {
   els.sizePreset.addEventListener("change", () => {
     updateSizeControls();
   });
-  els.customWidth.addEventListener("input", () => updateLinkedAspectSize("width"));
-  els.customHeight.addEventListener("input", () => updateLinkedAspectSize("height"));
+  els.customWidth.addEventListener("input", () => handleSizeInput("width"));
+  els.customHeight.addEventListener("input", () => handleSizeInput("height"));
+  els.customWidth.addEventListener("blur", () => finalizeSizeInput("width"));
+  els.customHeight.addEventListener("blur", () => finalizeSizeInput("height"));
 
   document.querySelectorAll("input[name='mode']").forEach((input) => {
     input.addEventListener("change", () => {
@@ -199,64 +206,117 @@ function getSourceRatio() {
 
 function updateAspectDefaults() {
   if (!state.sourceImage || !["auto-width", "auto-height"].includes(els.sizePreset.value)) return;
-  updateLinkedAspectSize(els.sizePreset.value === "auto-width" ? "width" : "height");
+  finalizeSizeInput(els.sizePreset.value === "auto-width" ? "width" : "height");
 }
 
 function updateSizeControls() {
   const preset = els.sizePreset.value;
   const usesCustomInputs = ["custom", "auto-width", "auto-height"].includes(preset);
+  const isAutoWidth = preset === "auto-width";
+  const isAutoHeight = preset === "auto-height";
   els.customSizeRow.hidden = !usesCustomInputs;
-  els.customWidth.disabled = preset === "auto-height";
-  els.customHeight.disabled = preset === "auto-width";
+  els.sizeHint.hidden = !isAutoWidth && !isAutoHeight;
+  els.sizeHint.textContent = isAutoWidth
+    ? "输入宽度，高度会按原图比例自动计算。"
+    : "输入高度，宽度会按原图比例自动计算。";
 
-  if (preset === "auto-width") {
+  els.widthLabel.textContent = isAutoHeight ? "自动宽" : "宽";
+  els.heightLabel.textContent = isAutoWidth ? "自动高" : "高";
+  setDerivedSizeField(els.customWidth, els.widthField, isAutoHeight);
+  setDerivedSizeField(els.customHeight, els.heightField, isAutoWidth);
+
+  if (isAutoWidth) {
     updateLinkedAspectSize("width");
-  } else if (preset === "auto-height") {
+  } else if (isAutoHeight) {
     updateLinkedAspectSize("height");
   }
 }
 
-function updateLinkedAspectSize(source) {
+function setDerivedSizeField(input, field, isDerived) {
+  input.readOnly = isDerived;
+  input.tabIndex = isDerived ? -1 : 0;
+  input.setAttribute("aria-readonly", String(isDerived));
+  field.classList.toggle("input-derived", isDerived);
+}
+
+function handleSizeInput(source) {
+  const preset = els.sizePreset.value;
+  if ((preset === "auto-width" && source === "width") || (preset === "auto-height" && source === "height")) {
+    updateLinkedAspectSize(source);
+  }
+}
+
+function finalizeSizeInput(source) {
+  const preset = els.sizePreset.value;
+  if (preset === "custom") {
+    const width = source === "height" ? normalizeDimensionInput(els.customWidth, false) : normalizeDimensionInput(els.customWidth, true);
+    const height = source === "width" ? normalizeDimensionInput(els.customHeight, false) : normalizeDimensionInput(els.customHeight, true);
+    return { width, height };
+  }
+
+  if (preset === "auto-width") return updateLinkedAspectSize("width", true);
+  if (preset === "auto-height") return updateLinkedAspectSize("height", true);
+  return null;
+}
+
+function normalizeDimensionInput(input, shouldWrite) {
+  const parsed = parseDimensionInput(input, true);
+  const value = clamp(Number.isFinite(parsed) ? parsed : 58, 8, 300);
+  if (shouldWrite) input.value = String(value);
+  return value;
+}
+
+function parseDimensionInput(input, shouldClean = false) {
+  const rawValue = String(input.value).trim();
+  const cleanValue = rawValue.replace(/[^\d]/g, "");
+  if (shouldClean && cleanValue !== rawValue) input.value = cleanValue;
+  return Number.parseInt(cleanValue, 10);
+}
+
+function updateLinkedAspectSize(source, shouldFinalize = false) {
   if (!state.sourceImage) return;
   const preset = els.sizePreset.value;
   if (preset === "auto-width" && source === "width") {
-    const width = clamp(Number.parseInt(els.customWidth.value, 10) || 58, 8, 300);
+    const parsed = parseDimensionInput(els.customWidth, true);
+    if (!Number.isFinite(parsed)) {
+      els.customHeight.value = "";
+      return null;
+    }
+    const width = shouldFinalize ? clamp(parsed, 8, 300) : parsed;
     const height = clamp(Math.round(width / getSourceRatio()), 8, 300);
-    els.customWidth.value = String(width);
+    if (shouldFinalize) els.customWidth.value = String(width);
     els.customHeight.value = String(height);
+    return { width: clamp(width, 8, 300), height };
   } else if (preset === "auto-height" && source === "height") {
-    const height = clamp(Number.parseInt(els.customHeight.value, 10) || 58, 8, 300);
+    const parsed = parseDimensionInput(els.customHeight, true);
+    if (!Number.isFinite(parsed)) {
+      els.customWidth.value = "";
+      return null;
+    }
+    const height = shouldFinalize ? clamp(parsed, 8, 300) : parsed;
     const width = clamp(Math.round(height * getSourceRatio()), 8, 300);
-    els.customHeight.value = String(height);
+    if (shouldFinalize) els.customHeight.value = String(height);
     els.customWidth.value = String(width);
+    return { width, height: clamp(height, 8, 300) };
   }
+  return null;
 }
 
 function getRequestedSize() {
   if (els.sizePreset.value !== "custom") {
     if (els.sizePreset.value === "auto-width") {
-      updateLinkedAspectSize("width");
-      const width = Number.parseInt(els.customWidth.value, 10);
-      const height = Number.parseInt(els.customHeight.value, 10);
-      return { width, height };
+      return finalizeSizeInput("width") || { width: 58, height: 58 };
     }
 
     if (els.sizePreset.value === "auto-height") {
-      updateLinkedAspectSize("height");
-      const width = Number.parseInt(els.customWidth.value, 10);
-      const height = Number.parseInt(els.customHeight.value, 10);
-      return { width, height };
+      return finalizeSizeInput("height") || { width: 58, height: 58 };
     }
 
     const [width, height] = els.sizePreset.value.split("x").map(Number);
     return { width, height };
   }
 
-  const width = clamp(Number.parseInt(els.customWidth.value, 10) || 58, 8, 300);
-  const height = clamp(Number.parseInt(els.customHeight.value, 10) || 58, 8, 300);
-  els.customWidth.value = String(width);
-  els.customHeight.value = String(height);
-  return { width, height };
+  return finalizeSizeInput("both");
 }
 
 function generatePattern() {

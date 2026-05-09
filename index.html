@@ -54,15 +54,16 @@
               <option value="custom">自定义</option>
             </select>
             <div class="size-row" id="customSizeRow" hidden>
-              <label>
-                <span>宽</span>
-                <input id="customWidth" type="number" min="8" max="300" value="58">
+              <label id="widthField">
+                <span id="widthLabel">宽</span>
+                <input id="customWidth" type="text" inputmode="numeric" pattern="[0-9]*" value="58">
               </label>
-              <label>
-                <span>高</span>
-                <input id="customHeight" type="number" min="8" max="300" value="58">
+              <label id="heightField">
+                <span id="heightLabel">高</span>
+                <input id="customHeight" type="text" inputmode="numeric" pattern="[0-9]*" value="58">
               </label>
             </div>
+            <p class="size-hint" id="sizeHint" hidden></p>
           </div>
 
           <div class="field-group">

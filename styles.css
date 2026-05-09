@@ -220,6 +220,23 @@ select,
   font-size: 13px;
 }
 
+.size-row label.input-derived {
+  opacity: 0.78;
+}
+
+.size-row input[readonly] {
+  background: #f4f7f5;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.size-hint {
+  margin: -2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .range-row {
   display: grid;
   grid-template-columns: 1fr 56px;
