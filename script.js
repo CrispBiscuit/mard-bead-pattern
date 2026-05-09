@@ -276,6 +276,7 @@ function parseDimensionInput(input, shouldClean = false) {
 function updateLinkedAspectSize(source, shouldFinalize = false) {
   if (!state.sourceImage) return;
   const preset = els.sizePreset.value;
+  const ratio = getSourceRatio();
   if (preset === "auto-width" && source === "width") {
     const parsed = parseDimensionInput(els.customWidth, true);
     if (!Number.isFinite(parsed)) {
@@ -283,10 +284,11 @@ function updateLinkedAspectSize(source, shouldFinalize = false) {
       return null;
     }
     const width = shouldFinalize ? clamp(parsed, 8, 300) : parsed;
-    const height = clamp(Math.round(width / getSourceRatio()), 8, 300);
+    const rawHeight = Math.max(1, Math.round(width / ratio));
+    const height = shouldFinalize ? clamp(rawHeight, 8, 300) : rawHeight;
     if (shouldFinalize) els.customWidth.value = String(width);
     els.customHeight.value = String(height);
-    return { width: clamp(width, 8, 300), height };
+    return { width: shouldFinalize ? clamp(width, 8, 300) : width, height };
   } else if (preset === "auto-height" && source === "height") {
     const parsed = parseDimensionInput(els.customHeight, true);
     if (!Number.isFinite(parsed)) {
@@ -294,10 +296,11 @@ function updateLinkedAspectSize(source, shouldFinalize = false) {
       return null;
     }
     const height = shouldFinalize ? clamp(parsed, 8, 300) : parsed;
-    const width = clamp(Math.round(height * getSourceRatio()), 8, 300);
+    const rawWidth = Math.max(1, Math.round(height * ratio));
+    const width = shouldFinalize ? clamp(rawWidth, 8, 300) : rawWidth;
     if (shouldFinalize) els.customHeight.value = String(height);
     els.customWidth.value = String(width);
-    return { width, height: clamp(height, 8, 300) };
+    return { width, height: shouldFinalize ? clamp(height, 8, 300) : height };
   }
   return null;
 }

@@ -18,6 +18,7 @@ Build a maintenance-light GitHub Pages tool that converts PNG/JPG images into MA
 - [x] Users can generate non-square patterns by preserving the source image aspect ratio from a target width or height.
 - [x] Users can remove simple/solid image backgrounds into blank bead cells before color mapping.
 - [x] Aspect-ratio size inputs do not rewrite user keyboard input while typing.
+- [x] Aspect-ratio helper values avoid minimum-size clamping until blur or generation.
 
 # Plan
 
@@ -39,3 +40,5 @@ Build a maintenance-light GitHub Pages tool that converts PNG/JPG images into MA
 - [x] Re-run browser verification and push the cutout update.
 - [x] Fix aspect-ratio size input keyboard handling.
 - [x] Re-run local browser verification and push the input fix.
+- [x] Remove minimum-size clamping from live aspect-ratio typing.
+- [x] Re-test typing `30` from an initial `3` value and push the fix.
